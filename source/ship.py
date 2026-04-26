@@ -2,16 +2,19 @@ import pygame
 from math import cos, sin, radians,sqrt
 from objects import Object
 from bullet import Bullet
-from config import SCREEN_SIZEX,SCREEN_SIZEY, GRAVITY, THRUSTPOWER, FULLTANK,font,TURNSPEED,explosion_image
+from config import SCREEN_SIZEX,SCREEN_SIZEY, GRAVITY, THRUSTPOWER, FULLTANK,font,TURNSPEED,explosion_image,WASD_E,ARROW_RSHIFT,bullet_image
+from player import Player
+
+X = 0
+Y = 1
+
 borders = [SCREEN_SIZEX,SCREEN_SIZEY]   
 class Ship(Object):
-    def __init__(self, image, x, y):
-        super().__init__(image, x, y, "ship")
-        self.rect = self.image.get_rect()
-        self.rect.x = x
-        self.rect.y = y
-        self.pos = [float(x), float(y)]
+    def __init__(self, image, objects_group,player,control_scheme=1):
+        
+        super().__init__(image, objects_group, "ship")
         self.angle = 90
+        self.pos = [float(self.rect.x), float(self.rect.y)]
         self.image_angle_offset = -90
         self.speed = [0, 0]
         self.acceleration = [0, 0]
@@ -25,8 +28,15 @@ class Ship(Object):
         self.landed = False
         self.bullet_group = pygame.sprite.RenderUpdates()   
         self.reload_time = 10
-    
+        self.control_scheme = control_scheme
+        self.destroyed_timer = 120
+        self.destroy_image = explosion_image
+        self.objects_group = objects_group
+        self.player = player
+
     def thrust(self):
+        self.fuel -= 2
+        self.landed = False
         heading = self.angle
         thrustx = self.thrust_power * cos(radians(heading))
         thrusty = -self.thrust_power * sin(radians(heading))  # Negate for pygame Y-axis (down is positive)
@@ -38,108 +48,113 @@ class Ship(Object):
 
     def turnleft(self):
         self.angle += self.turnspeed
+        self.fuel -= 1
         if self.angle > 360:
             diff = self.angle - 360
             self.angle = 0 + diff
 
     def turnright(self):
-        self.angle -= 3
+        self.angle -= self.turnspeed
+        self.fuel -= 1
         if self.angle < 0:
             self.angle = 360 + self.angle
     
     def shoot(self):
-        bullet = Bullet("bullet.png", self.rect.centerx+100*cos(radians(self.angle)), self.rect.centery-100*sin(radians(self.angle)), self.angle,self.speed)
+        if self.reload_time > 0:
+            return
+        self.reload_time = 10
+        bullet = Bullet(bullet_image, self.rect.centerx+100*cos(radians(self.angle)), self.rect.centery-100*sin(radians(self.angle)), self.angle,self.speed)
         self.bullet_group.add(bullet)
     
     def clamp(self): 
         #This is managing the borders it also applys friction on the sides. 
         if self.rect.x <= 0:
             self.rect.x = 0
-            if self.speed[0] < 0:
-                self.speed[0] = 0
-                self.speed[1] = 0
-            if self.acceleration[0] < 0:
-                self.acceleration[0] = 0
-                self.acceleration[1] = 0
+            if self.speed[X] < 0:
+                self.bounce(X, 1)
         if self.rect.x >= borders[0] - self.rect.width:
             self.rect.x = borders[0] - self.rect.width
-            if self.speed[0] > 0:
-                self.speed[0] = 0
-            if self.acceleration[0] > 0:
-                self.acceleration[0] = 0
-        if self.rect.y <= 0:
+            if self.speed[X] > 0:
+                self.bounce(X, -1)
+        if self.rect.y <= 0:    
             self.rect.y = 0
-            if self.speed[1] < 0:
-                self.speed[1] = 0
-            if self.acceleration[1] < 0:
-                self.acceleration[1] = 0
+            if self.speed[Y] < 0:
+                self.bounce(Y, 1 )
         if self.rect.y >= borders[1] - self.rect.height:
             self.grounded = True
-            self.rect.y = borders[1] - self.rect.height
-            if self.speed[1] > 0:
-                self.speed[1] = 0
-            if self.acceleration[1] > 0:
-                self.acceleration[1] = 0
+            if self.speed[Y] > 0:
+               self.bounce(Y, -1)  
         else:
             self.grounded = False
         if self.grounded:
-            self.speed[0] *= self.drag
-            if abs(self.speed[0]) < 0.1:
-                self.speed[0] = 0
+            self.speed[X] *= self.drag
+            if abs(self.speed[X]) < 0.1:
+                self.speed[X] = 0
         
     def handle_landing(self, landingpad):
-        self.handle_collision(landingpad)  # Handle collision response first
-        if self.rect.colliderect(landingpad.rect):
-            # Check if landing conditions are met (e.g., low speed, correct angle)
-            if self.rect.y <= landingpad.rect.y-0.1 and abs(self.speed[0]) < 1 and abs(self.speed[1]) < 1 and ((self.angle - 90) % 360 < 30 or (self.angle - 90) % 360 > 340):
+        # Check if landing conditions are met (e.g., low speed, correct angle)
+        self.landed =True
+        if  self.rect.y<=(landingpad.rect.y+80) and abs(self.speed[X]) < 3 and abs(self.speed[Y]) < 3 and ((self.angle - 90) % 360 < 30 or (self.angle - 90) % 360 > 340):
                 self.landed = True
+                self.speed[X] *=self.drag
                 self.fuel = FULLTANK  # Refuel on landing
-            else:
-                self.destroy()
+        else:
+            self.destroy()
+
     def destroy(self):
-        self.destroyed = True
-        self.image = explosion_image
-        self.rect = self.image.get_rect(center=self.rect.center)
+        if not self.destroyed:
+            self.player.add_score(-1)
+            self.angle = 90
+            self.speed = [0, 0]
+            self.acceleration = [0, 0]
+            self.fuel = FULLTANK
+            self.destroyed = True
+
     def update(self):
-        # Handle events
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                global run
-                run = False
+        # Cool down shooting so holding shoot works at a fixed fire rate.
+        if self.reload_time > 0:
+            self.reload_time -= 1
+        self.clamp()
 
         for bullet in self.bullet_group:
             bullet.update()
             if bullet.rect.x < 0 or bullet.rect.x > borders[0] or bullet.rect.y < 0 or bullet.rect.y > borders[1]:
                 bullet.kill()  # Remove bullet if it goes off-screen
         if self.destroyed:
-            return
+            if self.destroyed_timer >= 0:  # After displaying "Ship Destroyed!" for 2 seconds, reset the ship
+                self.destroyed_timer -= 1
+                return
+            else:
+                self.place(self.objects_group)  # Re-place the ship in the game
+                self.destroyed_timer = 120
+                self.destroyed = False
         # Get input
         keys = pygame.key.get_pressed()
         if self.fuel <= 0:
             self.fuel = 0
         else:
             # Handle rotation and thrust
-            if not self.landed:
-                if keys[pygame.K_LEFT]:
-                    self.turnleft()
-                    self.fuel -= 1
-    
-                if keys[pygame.K_RIGHT]:
-                    self.turnright()
-                    self.fuel -= 1  
-            if self.reload_time > 0:
-                self.reload_time -= 1
-
-            if keys[pygame.K_SPACE]:
-                if self.reload_time <= 0:
+            if self.control_scheme == WASD_E:
+                if not self.landed:
+                    if keys[pygame.K_a]:
+                        self.turnleft()
+                    if keys[pygame.K_d]:
+                        self.turnright()
+                if keys[pygame.K_w]:
+                    self.thrust()
+                if keys[pygame.K_e]:
                     self.shoot()
-                    self.reload_time = 10  # Reset reload time
-            if keys[pygame.K_UP]:
-                self.thrust()
-                self.landed = False
-                self.fuel -= 2  
+            elif self.control_scheme == ARROW_RSHIFT:
+                if not self.landed:
+                    if keys[pygame.K_LEFT]:
+                        self.turnleft()
+                    if keys[pygame.K_RIGHT]:
+                        self.turnright()
+                if keys[pygame.K_UP]:
+                    self.thrust()
+                if keys[pygame.K_RSHIFT]:
+                    self.shoot()
 
-        
         self.gravity()
 
         self.speed[0] += self.acceleration[0]
@@ -147,37 +162,72 @@ class Ship(Object):
         self.rect.x += self.speed[0]
         self.rect.y += self.speed[1]
         
-        self.clamp()
 
         # Apply boundaries
         self.pos[0] = float(self.rect.x)
         self.pos[1] = float(self.rect.y)
-        
-        # Reset acceleration each frame (gravity will reapply)
+
+        # Forces are re-applied every frame; do not carry acceleration over.
         self.acceleration[0] = 0
         self.acceleration[1] = 0
-
+    def bounce(self,Axis,direction,AXIS2=None,DIRECTION2=None):
+        if AXIS2 and DIRECTION2:
+            if AXIS2 == X:
+                if self.speed[0] > 0.1 or self.speed[0] < -0.1:
+                    self.speed[0] *= DIRECTION2 * 0.4  # Damping factor
+                    self.rect.x -= self.speed[0]
+            elif AXIS2 == Y:
+                if self.speed[1] > 0.1 or self.speed[1] < -0.1:
+                    self.speed[1] *= DIRECTION2 * 0.4  # Damping factor
+                    self.rect.y += self.speed[1]
+        if Axis == X:
+            if self.speed[0] > 0.1 or self.speed[0] < -0.1:
+                self.speed[0] *= direction * 0.4  # Damping factor
+                self.rect.x -= self.speed[0]
+        elif Axis == Y:
+            if self.speed[1] > 0.1 or self.speed[1] < -0.1:
+                self.speed[1] *= direction * 0.4  # Damping factor
+                self.rect.y += self.speed[1]
     def pixel_perfect_collision(self, other):
         return pygame.sprite.collide_mask(self, other)  
+    def find_collision_axis(self, other):
+        # Determine the primary axis of collision based on the overlap
+        dx = (self.rect.centerx - other.rect.centerx) / (other.rect.width / 2)
+        dy = (self.rect.centery - other.rect.centery) / (other.rect.height / 2)
+        if abs(dx) > abs(dy):
+            return X, 1 if dx > 0 else -1
+        else:
+            return Y, 1 if dy > 0 else -1
     def handle_collision(self, other):
-        if other.name == "astroid":
+        collaxis = self.find_collision_axis(other)
+        if collaxis[1] == 1:
+            if self.speed[collaxis[0]] < 0:
+                self.speed[collaxis[0]] = 0
+        else:  
+            if self.speed[collaxis[0]] > 0:
+                self.speed[collaxis[0]] = 0
+        if other.name == "landingpad":
+            self.handle_landing(other)
+        else:   
             self.destroy()
-        if self.rect.colliderect(other.rect):
-            # Push ship away
-            self.rect.x -= self.speed[0]
-            self.rect.y -= self.speed[1]
-            # Reverse velocity
-            self.speed[0] *= -0.01 # Damping factor
-            self.speed[1] *= -0.01
+    def fuel_text(self):
+        return f"Fuel: {self.fuel}"
+    def score_text(self):        
+        return f"Score: {self.player.get_score()}"
 
     def draw(self, surface):
         text = False
-        if self.fuel <= 1000:
-            text = font.render(f"Fuel: {self.fuel}", True, (255, 0, 0))
+        text_fuel = font.render(self.fuel_text(), True, (255, 0, 0))
+        text_score = font.render(self.score_text(), True, (255, 0, 0))
         if self.destroyed:
-            text = font.render("Ship Destroyed!", True, (255, 0, 0))
-        if text:
-            surface.blit(text, (10, 10))
+            surface.blit(self.destroy_image, self.rect)  # Draw explosion image at ship's position
+            return 
+        if self.player.get_name() == "Player 1":
+            surface.blit(text_fuel, (10, 10))
+            surface.blit(text_score, (10, 40))
+        else:
+            surface.blit(text_fuel, (SCREEN_SIZEX-text_fuel.get_width()-10,10))
+            surface.blit(text_score, (SCREEN_SIZEX-text_score.get_width()-10,40))
         for bullet in self.bullet_group:
             if not bullet.destroyed:
                 bullet.draw(surface)
