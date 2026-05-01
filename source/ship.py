@@ -10,16 +10,19 @@ Y = 1
 
 borders = [SCREEN_SIZEX,SCREEN_SIZEY]   
 class Ship(Object):
-    def __init__(self, image, objects_group,player,control_scheme=1):
+    '''Represents a player controlled ship
+    Handles movement, shooting, collision and drawing of the ship.
+    as well as the player's score and fuel.'''
+    def __init__(self, image: pygame.Surface, objects_group: pygame.sprite.Group, player: Player, control_scheme=1):
         
-        super().__init__(image, objects_group, "ship")
+        super().__init__(image, "ship")
         self.angle = 90
         self.pos = [float(self.rect.x), float(self.rect.y)]
         self.image_angle_offset = -90
         self.speed = [0, 0]
         self.acceleration = [0, 0]
         self.thrust_power = THRUSTPOWER
-        self.drag = 0.96
+        self.drag = 0.95
         self.max_speed = 12
         self.grounded = False
         self.turnspeed = TURNSPEED
@@ -35,6 +38,7 @@ class Ship(Object):
         self.player = player
 
     def thrust(self):
+        '''Apply thrust in the direction the ship is currently facing, consuming fuel.'''
         self.fuel -= 2
         self.landed = False
         heading = self.angle
@@ -44,9 +48,11 @@ class Ship(Object):
         self.acceleration[1] += thrusty 
     
     def gravity(self):
+        '''Apply gravity'''
         self.acceleration[1] += GRAVITY
 
     def turnleft(self):
+        '''Turn the ship left, consuming fuel.'''
         self.angle += self.turnspeed
         self.fuel -= 1
         if self.angle > 360:
@@ -54,12 +60,14 @@ class Ship(Object):
             self.angle = 0 + diff
 
     def turnright(self):
+        '''Turn the ship right, consuming fuel.'''
         self.angle -= self.turnspeed
         self.fuel -= 1
         if self.angle < 0:
             self.angle = 360 + self.angle
     
     def shoot(self):
+        '''Fire a bullet, if the reload time has passed'''
         if self.reload_time > 0:
             return
         self.reload_time = 10
@@ -67,7 +75,7 @@ class Ship(Object):
         self.bullet_group.add(bullet)
     
     def clamp(self): 
-        #This is managing the borders it also applys friction on the sides. 
+        '''Manage collisions with the borders of the game world, applying bounce'''
         if self.rect.x <= 0:
             self.rect.x = 0
             if self.speed[X] < 0:
@@ -92,16 +100,28 @@ class Ship(Object):
                 self.speed[X] = 0
         
     def handle_landing(self, landingpad):
-        # Check if landing conditions are met (e.g., low speed, correct angle)
-        self.landed =True
-        if  self.rect.y<=(landingpad.rect.y+80) and abs(self.speed[X]) < 3 and abs(self.speed[Y]) < 3 and ((self.angle - 90) % 360 < 30 or (self.angle - 90) % 360 > 340):
+        '''Handle lands on the landing pad'''
+        #Debuggin to check what is wrong with a landing 
+        angle_delta = (self.angle - 90) % 360            
+        can_land = (
+            self.rect.y <= (landingpad.rect.y + 80)
+            and abs(self.speed[X]) < 10
+            and abs(self.speed[Y]) < 20
+            and (angle_delta < 30 or angle_delta >= 330)
+        )
+        if can_land:
                 self.landed = True
                 self.speed[X] *=self.drag
                 self.fuel = FULLTANK  # Refuel on landing
+                if self.speed[Y] > 0:
+                    self.speed[Y] = 0
+
         else:
+            self.speed = [0, 0]
             self.destroy()
 
     def destroy(self):
+        '''Destroy the ship if not alrea destroyed'''
         if not self.destroyed:
             self.player.add_score(-1)
             self.angle = 90
@@ -111,6 +131,8 @@ class Ship(Object):
             self.destroyed = True
 
     def update(self):
+        '''Update the ship, and bulllets fired by the ship. 
+        Handles input and applies movement'''
         # Cool down shooting so holding shoot works at a fixed fire rate.
         if self.reload_time > 0:
             self.reload_time -= 1
@@ -170,7 +192,9 @@ class Ship(Object):
         # Forces are re-applied every frame; do not carry acceleration over.
         self.acceleration[0] = 0
         self.acceleration[1] = 0
+
     def bounce(self,Axis,direction,AXIS2=None,DIRECTION2=None):
+        '''Bounces off an object, directions is roughly in the direction the collision.'''
         if AXIS2 and DIRECTION2:
             if AXIS2 == X:
                 if self.speed[0] > 0.1 or self.speed[0] < -0.1:
@@ -188,46 +212,51 @@ class Ship(Object):
             if self.speed[1] > 0.1 or self.speed[1] < -0.1:
                 self.speed[1] *= direction * 0.4  # Damping factor
                 self.rect.y += self.speed[1]
+
     def pixel_perfect_collision(self, other):
-        return pygame.sprite.collide_mask(self, other)  
-    def find_collision_axis(self, other):
-        # Determine the primary axis of collision based on the overlap
-        dx = (self.rect.centerx - other.rect.centerx) / (other.rect.width / 2)
-        dy = (self.rect.centery - other.rect.centery) / (other.rect.height / 2)
-        if abs(dx) > abs(dy):
-            return X, 1 if dx > 0 else -1
-        else:
-            return Y, 1 if dy > 0 else -1
+        '''Check for pixel-perfect collision with another object.'''
+        return pygame.sprite.collide_mask(self, other) 
+     
     def handle_collision(self, other):
-        collaxis = self.find_collision_axis(other)
-        if collaxis[1] == 1:
-            if self.speed[collaxis[0]] < 0:
-                self.speed[collaxis[0]] = 0
-        else:  
-            if self.speed[collaxis[0]] > 0:
-                self.speed[collaxis[0]] = 0
-        if other.name == "landingpad":
-            self.handle_landing(other)
-        else:   
-            self.destroy()
+        '''Stops the ship from moving through objects, if the object is not a landing pad destroy the ship'''
+        if not self.destroyed:
+            
+            if other.name == "landingpad":
+                self.handle_landing(other)
+            else:  
+                self.speed = [0, 0] 
+                self.destroy()
+
     def fuel_text(self):
+        '''Return the fuel text to be displayed on the screen.'''
         return f"Fuel: {self.fuel}"
-    def score_text(self):        
+    
+    def score_text(self):     
+        '''Return the score text to be displayed on the screen.'''   
         return f"Score: {self.player.get_score()}"
+    def speed_text(self):
+        '''Return the speed text to be displayed on the screen.'''
+        speed = sqrt(self.speed[X]**2 + self.speed[Y]**2)
+        return f"Speedx: {int(self.speed[X])} Speedy: {int(self.speed[Y])} Total: {int(speed)}"
 
     def draw(self, surface):
+        '''Displays the ship and associated text on the screen. 
+        If ships is destoryed, displays and explosion instead.'''
         text = False
         text_fuel = font.render(self.fuel_text(), True, (255, 0, 0))
         text_score = font.render(self.score_text(), True, (255, 0, 0))
+        text_speed = font.render(self.speed_text(), True, (255, 0, 0))
         if self.destroyed:
-            surface.blit(self.destroy_image, self.rect)  # Draw explosion image at ship's position
+            surface.blit(self.destroy_image, self.rect)  
             return 
         if self.player.get_name() == "Player 1":
             surface.blit(text_fuel, (10, 10))
             surface.blit(text_score, (10, 40))
+            surface.blit(text_speed, (10, 70))
         else:
             surface.blit(text_fuel, (SCREEN_SIZEX-text_fuel.get_width()-10,10))
             surface.blit(text_score, (SCREEN_SIZEX-text_score.get_width()-10,40))
+            surface.blit(text_speed, (SCREEN_SIZEX-text_speed.get_width()-10,70))
         for bullet in self.bullet_group:
             if not bullet.destroyed:
                 bullet.draw(surface)

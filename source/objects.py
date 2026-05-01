@@ -8,24 +8,26 @@ def distance_between(x1, y1, x2, y2):
     return ((x1 - x2)**2 + (y1 - y2)**2)**0.5
 
 class Object(pygame.sprite.Sprite, ABC):
-    def __init__(self, image, objects_group, name):
+    '''Base class for all game objects, handles basic properties and placement logic.'''
+    def __init__(self, image: pygame.Surface, name: str):
         super().__init__()
         self.name = name
         self.image = image
         self.rect = self.image.get_rect()
+    def draw(self, surface: pygame.Surface):
+        '''Draw the object on the surface.'''
+        surface.blit(self.image, self.rect)
 
-    @abstractmethod
-    def draw(self, surface):
-        pass
-    def update(self, *args, **kwargs):
-        pass
-
-    def place(self, objects_group):
+    def place(self, objects_group: pygame.sprite.Group):
+        '''
+        Adds object to the game world, 
+        Tries to find a postion, that works through random guessing, it fails after a certain number of attempts
+        '''
         placed = False
         attempts = 0
         while not placed and attempts < objectplaceattempts:  
-            x = randint(30, SCREEN_SIZEX-200)
-            y = randint(30, SCREEN_SIZEY-200)
+            x = randint(200, SCREEN_SIZEX-200)
+            y = randint(200, SCREEN_SIZEY-200)
             safe = True
             for object in objects_group:
                 if distance_between(x, y, object.rect.centerx, object.rect.centery) < MIN_DISTANCE:
@@ -46,17 +48,15 @@ class Object(pygame.sprite.Sprite, ABC):
 
 
 class landingpad(Object):
-    def __init__(self, image_path, objects_group):
-        super().__init__(image_path, objects_group, "landingpad")
-    def draw(self, surface):
-        surface.blit(self.image, self.rect)
+    '''Represents the landing pad, handles drawing of the landing pad.'''
+    def __init__(self, image: pygame.Surface):
+        super().__init__(image, "landingpad")
 
-class astroid(Object):    
-    def __init__(self, image, objects_group):
-        super().__init__(image, objects_group, "astroid")
+class astroid(Object):  
+    '''Represents an asteroid, handles drawing of the asteroid.'''  
+    def __init__(self, image: pygame.Surface):
+        super().__init__(image, "astroid")
         self.image = image
         self.rect = self.image.get_rect()
-    def draw(self, surface):
-        surface.blit(self.image, self.rect) 
 
 
